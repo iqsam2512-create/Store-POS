@@ -18,7 +18,7 @@
   },
   "build": {
     "appId": "iq.storepos.app",
-    "productName": "نقطة البيع",
+    "productName": "Store POS IQ",
     "copyright": "Copyright © Hosting Domain",
     "directories": {
       "output": "release",
@@ -55,8 +55,10 @@
       "shortcutName": "نقطة البيع",
       "installerIcon": "build/icon.ico",
       "uninstallerIcon": "build/icon.ico",
-      "installerHeaderIcon": "build/icon.ico"
-    }
+      "installerHeaderIcon": "build/icon.ico",
+      "artifactName": "StorePOS-IQ-Setup-${version}.${ext}"
+    },
+    "executableName": "StorePOS"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
