@@ -4,30 +4,33 @@ import { requireAnyPerm } from '../auth.js';
 
 const router = Router();
 
-const DEMO_CATEGORIES = ['Soft drinks', 'Snacks', 'Dairy', 'Bakery', 'Household'];
+const DEMO_CATEGORIES = ['مشروبات', 'حلويات وشيبس', 'ألبان', 'خبز ومعجنات', 'منظفات', 'دخان'];
 
+// Prices in IQD (whole dinars). Barcodes are 13-digit EAN-style demo codes.
 const DEMO_PRODUCTS = [
-  { name: 'Coca-Cola 440ml', price: 18.99, category: 'Soft drinks', quantity: 48 },
-  { name: 'Sprite 440ml', price: 17.99, category: 'Soft drinks', quantity: 36 },
-  { name: 'Still water 500ml', price: 12.5, category: 'Soft drinks', quantity: 60 },
-  { name: 'Simba chips 120g', price: 19.99, category: 'Snacks', quantity: 40 },
-  { name: 'Nik Naks 55g', price: 9.99, category: 'Snacks', quantity: 50 },
-  { name: 'Chocolate bar', price: 14.5, category: 'Snacks', quantity: 45 },
-  { name: 'Milk 2L', price: 28.99, category: 'Dairy', quantity: 24 },
-  { name: "Eggs 18's", price: 42.0, category: 'Dairy', quantity: 20 },
-  { name: 'Cheddar cheese 250g', price: 49.99, category: 'Dairy', quantity: 15 },
-  { name: 'White bread loaf', price: 17.99, category: 'Bakery', quantity: 30 },
-  { name: 'Brown bread loaf', price: 19.99, category: 'Bakery', quantity: 24 },
-  { name: 'Vetkoek (each)', price: 8.5, category: 'Bakery', quantity: 40 },
-  { name: 'Dishwashing liquid 750ml', price: 34.99, category: 'Household', quantity: 18 },
-  { name: 'Toilet soap bar', price: 15.5, category: 'Household', quantity: 32 },
-  { name: 'Toilet paper 9s', price: 79.99, category: 'Household', quantity: 12 },
+  { name: 'بيبسي 330 مل', price: 500, category: 'مشروبات', quantity: 48, barcode: '6281006612541' },
+  { name: 'سفن أب 330 مل', price: 500, category: 'مشروبات', quantity: 36, barcode: '6281006612558' },
+  { name: 'ماء 500 مل', price: 250, category: 'مشروبات', quantity: 96, barcode: '6281100600014' },
+  { name: 'عصير راني 240 مل', price: 750, category: 'مشروبات', quantity: 40, barcode: '6291003000185' },
+  { name: 'شيبس ليز 40 غم', price: 500, category: 'حلويات وشيبس', quantity: 60, barcode: '6291100010025' },
+  { name: 'كيت كات 4 أصابع', price: 1000, category: 'حلويات وشيبس', quantity: 45, barcode: '7613034626844' },
+  { name: 'علكة اكسترا', price: 500, category: 'حلويات وشيبس', quantity: 80, barcode: '4009900484473' },
+  { name: 'حليب المراعي 1 لتر', price: 2500, category: 'ألبان', quantity: 24, barcode: '6281007000010' },
+  { name: 'لبن 1 كغم', price: 2000, category: 'ألبان', quantity: 18, barcode: '6281007000027' },
+  { name: 'جبن كيري 6 قطع', price: 3000, category: 'ألبان', quantity: 15, barcode: '3073780875059' },
+  { name: 'بيض 30 حبة', price: 6000, category: 'ألبان', quantity: 10, barcode: '' },
+  { name: 'صمون (5 حبات)', price: 1000, category: 'خبز ومعجنات', quantity: 0, barcode: '' , noStock: true },
+  { name: 'كيك بيتي فور', price: 1500, category: 'خبز ومعجنات', quantity: 20, barcode: '6281008010013' },
+  { name: 'فيري سائل جلي 1 لتر', price: 4000, category: 'منظفات', quantity: 12, barcode: '5413149263352' },
+  { name: 'تايد 1.5 كغم', price: 7500, category: 'منظفات', quantity: 8, barcode: '8001090790682' },
+  { name: 'كلينكس مناديل', price: 1500, category: 'منظفات', quantity: 30, barcode: '6281002100014' },
+  { name: 'ولاعة', price: 500, category: 'دخان', quantity: 40, barcode: '' },
 ];
 
 const DEMO_CUSTOMERS = [
-  { name: 'Thabo Molefe', phone: '082 555 0101', email: 'thabo@example.com', address: 'Sandton' },
-  { name: 'Aisha Khan', phone: '083 555 0202', email: 'aisha@example.com', address: 'Cape Town' },
-  { name: 'Johan van Wyk', phone: '084 555 0303', email: 'johan@example.com', address: 'Pretoria' },
+  { name: 'أبو علي', phone: '07701234567', email: '', address: 'الدورة' },
+  { name: 'أم حسين', phone: '07812345678', email: '', address: 'السيدية' },
+  { name: 'حيدر كريم', phone: '07901234567', email: '', address: 'المنصور' },
 ];
 
 router.post('/seed', requireAnyPerm('perm_products', 'perm_settings'), (_req, res) => {
@@ -47,13 +50,13 @@ router.post('/seed', requireAnyPerm('perm_products', 'perm_settings'), (_req, re
     }
 
     const insertProduct = db.prepare(
-      `INSERT INTO products (name, price, category, quantity, stock, img)
-       VALUES (?, ?, ?, ?, 1, '')`
+      `INSERT INTO products (name, price, category, quantity, stock, img, barcode)
+       VALUES (?, ?, ?, ?, ?, '', ?)`
     );
     for (const p of DEMO_PRODUCTS) {
       const existing = db.prepare('SELECT id FROM products WHERE name = ?').get(p.name);
       if (!existing) {
-        insertProduct.run(p.name, p.price, p.category, p.quantity);
+        insertProduct.run(p.name, p.price, p.category, p.quantity, p.noStock ? 0 : 1, p.barcode || '');
         productsAdded += 1;
       }
     }

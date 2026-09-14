@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api, getUploadsBase, MediaItem, PexelsPhoto } from '../api/client';
 import Modal from './Modal';
+import { useT } from '../i18n';
 
 type Props = {
   value: string;
@@ -15,8 +16,10 @@ export default function PhotoPicker({
   value,
   onChange,
   suggestedQuery = '',
-  label = 'Photo',
+  label,
 }: Props) {
+  const { t } = useT();
+  const labelText = label || t('cat.photo');
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<Tab>('library');
   const [library, setLibrary] = useState<MediaItem[]>([]);
@@ -51,9 +54,9 @@ export default function PhotoPicker({
     try {
       const result = await api.searchPexels(query.trim() || suggestedQuery || 'product');
       setPhotos(result.photos);
-      if (!result.photos.length) setError('No photos found');
+      if (!result.photos.length) setError(t('photo.notFound'));
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Search failed');
+      setError(err instanceof Error ? err.message : t('photo.searchFailed'));
       setPhotos([]);
     } finally {
       setBusy(false);
@@ -74,7 +77,7 @@ export default function PhotoPicker({
       onChange(item.path);
       setTab('library');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Download failed');
+      setError(err instanceof Error ? err.message : t('photo.downloadFailed'));
     } finally {
       setBusy(false);
     }
@@ -89,45 +92,45 @@ export default function PhotoPicker({
       onChange(item.path);
       setTab('library');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Upload failed');
+      setError(err instanceof Error ? err.message : t('photo.uploadFailed'));
     } finally {
       setBusy(false);
     }
   };
 
   const removeFromLibrary = async (id: number) => {
-    if (!confirm('Remove this image from the library?')) return;
+    if (!confirm(t('photo.remove'))) return;
     await api.deleteMedia(id);
     await loadLibrary();
   };
 
   return (
     <div className="field">
-      <label>{label}</label>
+      <label>{labelText}</label>
       <div className="photo-picker-row">
         <div className={`photo-preview ${value ? '' : 'empty'}`}>
-          {value ? <img src={previewSrc} alt="" /> : <span>No photo</span>}
+          {value ? <img src={previewSrc} alt="" /> : <span>{t('photo.none')}</span>}
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
           <button type="button" className="btn btn-primary" onClick={() => setOpen(true)}>
-            Choose {label.toLowerCase()}
+            {t('photo.choose', { label: labelText })}
           </button>
           {value && (
             <button type="button" className="btn" onClick={() => onChange('')}>
-              Clear
+              {t('photo.clear')}
             </button>
           )}
         </div>
       </div>
 
       <Modal
-        title="Photo library"
+        title={t('photo.library')}
         open={open}
         onClose={() => setOpen(false)}
         wide
         footer={
           <button type="button" className="btn" onClick={() => setOpen(false)}>
-            Done
+            {t('common.done')}
           </button>
         }
       >
@@ -137,7 +140,7 @@ export default function PhotoPicker({
             className={`chip ${tab === 'library' ? 'active' : ''}`}
             onClick={() => setTab('library')}
           >
-            Library
+            {t('photo.tabLibrary')}
           </button>
           <button
             type="button"
@@ -151,7 +154,7 @@ export default function PhotoPicker({
             className={`chip ${tab === 'upload' ? 'active' : ''}`}
             onClick={() => setTab('upload')}
           >
-            Upload
+            {t('photo.tabUpload')}
           </button>
         </div>
 
@@ -171,7 +174,7 @@ export default function PhotoPicker({
                 tabIndex={0}
               >
                 <img src={`${uploads}/${item.path}`} alt={item.alt || ''} />
-                <span>{item.source === 'pexels' ? 'Pexels' : 'Upload'}</span>
+                <span>{item.source === 'pexels' ? 'Pexels' : t('photo.tabUpload')}</span>
                 <button
                   type="button"
                   className="media-del"
@@ -185,7 +188,7 @@ export default function PhotoPicker({
               </div>
             ))}
             {!library.length && (
-              <div className="empty">Library is empty — search Pexels or upload a file</div>
+              <div className="empty">{t('photo.emptyLibrary')}</div>
             )}
           </div>
         )}
@@ -194,19 +197,19 @@ export default function PhotoPicker({
           <div>
             {!hasKey && (
               <div className="notice">
-                Add your Pexels API key under Settings → Media before searching.
+                {t('photo.needKey')}
               </div>
             )}
             <div className="filters">
               <div className="field" style={{ flex: 1, minWidth: 200 }}>
-                <label>Search Pexels</label>
+                <label>{t('photo.search')}</label>
                 <input
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') searchPexels();
                   }}
-                  placeholder={suggestedQuery || 'coffee, fruit, sandwich…'}
+                  placeholder={suggestedQuery || t('photo.searchPlaceholder')}
                 />
               </div>
               <button
@@ -215,7 +218,7 @@ export default function PhotoPicker({
                 onClick={searchPexels}
                 disabled={busy || !hasKey}
               >
-                {busy ? 'Searching…' : 'Search'}
+                {busy ? t('common.loading') : t('photo.search')}
               </button>
             </div>
             <div className="media-grid">
@@ -226,22 +229,22 @@ export default function PhotoPicker({
                   className="media-tile"
                   disabled={busy}
                   onClick={() => downloadPhoto(photo)}
-                  title={`Photo by ${photo.photographer}`}
+                  title={t('photo.by', { name: photo.photographer })}
                 >
                   <img src={photo.preview} alt={photo.alt} />
-                  <span>Save · {photo.photographer}</span>
+                  <span>{t('common.save')} · {photo.photographer}</span>
                 </button>
               ))}
             </div>
             <p className="muted" style={{ fontSize: '0.8rem', marginTop: '0.75rem' }}>
-              Photos are downloaded into your local library, then used offline on the till.
+              {t('set.pexelsHelp')}
             </p>
           </div>
         )}
 
         {tab === 'upload' && (
           <div className="field">
-            <label>Upload image to library</label>
+            <label>{t('photo.pickFile')}</label>
             <input
               type="file"
               accept="image/*"

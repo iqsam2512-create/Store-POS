@@ -146,7 +146,8 @@ export async function initDatabase(filePath) {
       category TEXT NOT NULL DEFAULT '',
       quantity INTEGER NOT NULL DEFAULT 0,
       stock INTEGER NOT NULL DEFAULT 1,
-      img TEXT NOT NULL DEFAULT ''
+      img TEXT NOT NULL DEFAULT '',
+      barcode TEXT NOT NULL DEFAULT ''
     );
 
     CREATE TABLE IF NOT EXISTS customers (
@@ -224,6 +225,13 @@ function migrateSchema() {
   if (!names.has('pexels_api_key')) {
     db.exec(`ALTER TABLE settings ADD COLUMN pexels_api_key TEXT NOT NULL DEFAULT ''`);
   }
+
+  // Barcode column (EAN/UPC as scanned) — added for the IQ fork.
+  const productCols = new Set(db.prepare('PRAGMA table_info(products)').all().map((c) => c.name));
+  if (!productCols.has('barcode')) {
+    db.exec(`ALTER TABLE products ADD COLUMN barcode TEXT NOT NULL DEFAULT ''`);
+  }
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_products_barcode ON products(barcode)`);
 }
 
 function seedDefaults() {
@@ -240,7 +248,7 @@ function seedDefaults() {
   if (!settings) {
     db.prepare(
       `INSERT INTO settings (id, app, store, symbol, percentage, charge_tax, till)
-       VALUES (1, 'Standalone Point of Sale', 'My Store', '$', 0, 0, 1)`
+       VALUES (1, 'Standalone Point of Sale', '', 'د.ع', 0, 0, 1)`
     ).run();
   }
 
@@ -279,6 +287,7 @@ export function mapProduct(row) {
     quantity: row.quantity,
     stock: row.stock,
     img: row.img,
+    barcode: row.barcode || '',
   };
 }
 

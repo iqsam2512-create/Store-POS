@@ -1,4 +1,6 @@
 import { useRef } from 'react';
+import { formatNumber, IQD_NOTES, parseMoney } from '../money';
+import { useT } from '../i18n';
 
 type Props = {
   value: string;
@@ -7,18 +9,18 @@ type Props = {
   symbol: string;
 };
 
-const SA_NOTES = [10, 20, 50, 100, 200];
-
-function formatAmount(n: number) {
-  return n.toFixed(2);
-}
-
-export default function PaymentPad({ value, onChange, due, symbol }: Props) {
+/**
+ * Cash pad for whole-dinar amounts. The value is kept as a plain digit string
+ * ("12500"); formatting happens in the display. There is no decimal key — instead a
+ * "000" key, because Iraqi prices are almost always round thousands.
+ */
+export default function PaymentPad({ value, onChange, due }: Props) {
+  const { t } = useT();
   // After Exact / note pick, the next digit replaces instead of appending.
   const replaceNext = useRef(false);
 
   const setAmount = (amount: number) => {
-    onChange(formatAmount(amount));
+    onChange(String(Math.round(amount)));
     replaceNext.current = true;
   };
 
@@ -33,58 +35,55 @@ export default function PaymentPad({ value, onChange, due, symbol }: Props) {
       replaceNext.current = false;
       return;
     }
-
-    if (key === '.') {
-      if (replaceNext.current || !value) {
-        onChange('0.');
-        replaceNext.current = false;
-        return;
-      }
-      if (value.includes('.')) return;
-      onChange(`${value}.`);
-      return;
-    }
-
     if (replaceNext.current || value === '' || value === '0') {
-      onChange(key);
+      onChange(key === '000' ? '' : key);
       replaceNext.current = false;
       return;
     }
-
     const next = value + key;
-    const [, dec] = next.split('.');
-    if (dec && dec.length > 2) return;
+    if (next.length > 9) return; // 999,999,999 IQD is plenty for a till
     onChange(next);
   };
 
-  const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '.', '0', '⌫'];
+  const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '000', '0', '⌫'];
+  const current = parseMoney(value);
 
   return (
     <>
       <div className="quick-cash">
-        <button type="button" className="btn" onClick={() => setAmount(due)}>
-          Exact
+        <button type="button" className="btn btn-primary" onClick={() => setAmount(due)}>
+          {t('pay.exact')}
         </button>
-        {SA_NOTES.map((note) => (
+        {IQD_NOTES.map((note) => (
           <button
             key={note}
             type="button"
             className="btn"
-            onClick={() => setAmount(note)}
+            // Tapping a note adds it to what's already tendered, so 25,000 + 5,000 works
+            // the way a cashier counts notes on the counter.
+            onClick={() => {
+              const base = replaceNext.current || !value ? 0 : current;
+              onChange(String(base + note));
+              replaceNext.current = false;
+            }}
           >
-            {symbol}
-            {note}
+            <span className="money">{formatNumber(note)}</span>
           </button>
         ))}
       </div>
       <div className="numpad">
         {keys.map((k) => (
-          <button key={k} type="button" onClick={() => append(k)}>
+          <button
+            key={k}
+            type="button"
+            className={k === '000' ? 'wide-key' : ''}
+            onClick={() => append(k)}
+          >
             {k}
           </button>
         ))}
         <button type="button" className="numpad-clear" onClick={() => append('C')}>
-          Clear
+          {t('pay.clear')}
         </button>
       </div>
     </>

@@ -1,3 +1,16 @@
+@font-face {
+  font-family: 'Cairo';
+  src: url('./fonts/Cairo-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Cairo';
+  src: url('./fonts/Cairo-Bold.ttf') format('truetype');
+  font-weight: 700;
+  font-display: swap;
+}
+
 :root {
   --bg: #f0f3f6;
   --surface: #ffffff;
@@ -11,8 +24,8 @@
   --danger: #b42318;
   --ok: #1f7a45;
   --shadow: 0 1px 2px rgba(21, 32, 43, 0.06), 0 8px 24px rgba(21, 32, 43, 0.06);
-  --font: "Segoe UI", "Candara", "Trebuchet MS", sans-serif;
-  --mono: "Cascadia Mono", "Consolas", monospace;
+  --font: "Cairo", "Segoe UI", "Tahoma", sans-serif;
+  --mono: "Cascadia Mono", "Consolas", "Cairo", monospace;
   --nav-w: 220px;
   --radius: 10px;
 }
@@ -99,7 +112,7 @@ button { cursor: pointer; }
   align-items: center;
   gap: 0.55rem;
   width: 100%;
-  text-align: left;
+  text-align: start;
   border: 0;
   background: transparent;
   color: inherit;
@@ -348,7 +361,7 @@ button { cursor: pointer; }
   padding: 0.5rem;
   background: #fafbfc;
   color: inherit;
-  text-align: left;
+  text-align: start;
   display: flex;
   flex-direction: column;
   gap: 0.3rem;
@@ -430,7 +443,7 @@ button { cursor: pointer; }
   padding: 0;
   overflow: hidden;
   background: #fff;
-  text-align: left;
+  text-align: start;
   display: flex;
   flex-direction: column;
   cursor: pointer;
@@ -457,7 +470,7 @@ button { cursor: pointer; }
 .media-del {
   position: absolute;
   top: 4px;
-  right: 4px;
+  inset-inline-end: 4px;
   width: 26px;
   height: 26px;
   border: 0;
@@ -522,7 +535,7 @@ button { cursor: pointer; }
   display: flex;
   align-items: center;
   gap: 0.65rem;
-  text-align: left;
+  text-align: start;
   border: 1px solid var(--line);
   background: #fbfcfd;
   border-radius: 10px;
@@ -618,7 +631,7 @@ button { cursor: pointer; }
   border: 0;
   background: transparent;
   padding: 0.55rem 0.7rem;
-  text-align: left;
+  text-align: start;
 }
 
 .customer-option:hover,
@@ -759,7 +772,7 @@ button { cursor: pointer; }
 
 .table th,
 .table td {
-  text-align: left;
+  text-align: start;
   padding: 0.6rem 0.4rem;
   border-bottom: 1px solid var(--line);
   font-size: 0.92rem;
@@ -808,7 +821,7 @@ button { cursor: pointer; }
 
 .quick-cash {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 0.3rem;
   margin: 0.4rem 0;
 }
@@ -858,25 +871,76 @@ button { cursor: pointer; }
   font-size: 0.95rem;
 }
 
+/* Receipt (80mm thermal). Rendered as real HTML so Arabic + numbers align properly. */
 .receipt {
-  font-family: var(--mono);
-  font-size: 0.85rem;
-  white-space: pre-wrap;
+  font-family: var(--font);
+  font-size: 12px;
+  color: #000;
+  background: #fff;
+  width: 72mm;
+  padding: 2mm 0;
 }
+.receipt h2 { margin: 0; font-size: 16px; text-align: center; }
+.receipt .r-center { text-align: center; margin: 0; }
+.receipt .r-muted { font-size: 11px; }
+.receipt hr { border: 0; border-top: 1px dashed #000; margin: 4px 0; }
+.receipt table { width: 100%; border-collapse: collapse; }
+.receipt th, .receipt td { padding: 1px 2px; vertical-align: top; }
+.receipt th { text-align: start; font-weight: 700; border-bottom: 1px solid #000; }
+.receipt .num { text-align: end; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.receipt .r-row { display: flex; justify-content: space-between; gap: 8px; }
+.receipt .r-total { font-size: 15px; font-weight: 700; }
 
 .kbd {
   font-size: 0.75rem;
   opacity: 0.65;
-  margin-left: 0.35rem;
+  margin-inline-start: 0.35rem;
 }
 
 @media print {
   body * { visibility: hidden; }
   #receipt-print, #receipt-print * { visibility: visible; }
   #receipt-print {
+    display: block !important;
     position: absolute;
-    left: 0;
+    inset-inline-start: 0;
     top: 0;
-    width: 80mm;
+    width: 72mm;
   }
+  @page { size: 80mm auto; margin: 3mm; }
 }
+
+
+/* --- IQ fork additions --- */
+.lang-switch {
+  display: flex;
+  gap: 0.25rem;
+  padding: 0.25rem 0.65rem 0.5rem;
+}
+.lang-switch button {
+  flex: 1;
+  border: 1px solid rgba(255,255,255,0.15);
+  background: transparent;
+  color: inherit;
+  border-radius: 6px;
+  padding: 0.25rem 0;
+  font-size: 0.8rem;
+  opacity: 0.7;
+}
+.lang-switch button.active { background: rgba(255,255,255,0.14); opacity: 1; font-weight: 700; }
+
+/* Money and barcodes always read left-to-right, even inside RTL text. */
+.money, .barcode, .num-ltr {
+  direction: ltr;
+  unicode-bidi: isolate;
+  font-variant-numeric: tabular-nums;
+  /* block-level money (tile price) should still hug the card's reading edge */
+  text-align: match-parent;
+}
+
+.quick-cash .btn { font-variant-numeric: tabular-nums; }
+.numpad button.wide-key { font-size: 0.95rem; font-weight: 700; }
+
+/* Bigger touch targets on the till — cashiers work fast. */
+.scan-bar input { font-size: 1.1rem; }
+.product-tile .price { font-weight: 700; }

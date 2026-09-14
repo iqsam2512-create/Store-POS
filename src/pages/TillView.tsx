@@ -10,6 +10,8 @@ import {
   getUploadsBase,
 } from '../api/client';
 import { useAuth } from '../context/AuthContext';
+import { useT } from '../i18n';
+import { formatDateTime, formatMoney, formatNumber, parseMoney, roundMoney } from '../money';
 import Modal from '../components/Modal';
 import PaymentPad from '../components/PaymentPad';
 import CustomerSelect from '../components/CustomerSelect';
@@ -24,6 +26,22 @@ type Props = {
   onHoldCount: (n: number) => void;
 };
 
+type ReceiptData = {
+  id?: number;
+  items: CartItem[];
+  subtotal: number;
+  tax: number;
+  discount: number;
+  total: number;
+  paid: number;
+  change: number;
+  method: string;
+  date: Date;
+};
+
+/** A scanned code that is not in the catalog — long digit strings are barcodes, not searches. */
+const looksLikeBarcode = (code: string) => /^\d{6,}$/.test(code);
+
 export default function TillView({
   products,
   categories,
@@ -34,12 +52,13 @@ export default function TillView({
   onHoldCount,
 }: Props) {
   const { user, apiInfo } = useAuth();
+  const { t } = useT();
   const scanRef = useRef<HTMLInputElement>(null);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [query, setQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [customerId, setCustomerId] = useState('0');
-  const [discount, setDiscount] = useState(0);
+  const [discount, setDiscount] = useState('');
   const [activeHoldId, setActiveHoldId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showHolds, setShowHolds] = useState(false);
@@ -47,11 +66,17 @@ export default function TillView({
   const [showPay, setShowPay] = useState(false);
   const [paid, setPaid] = useState('');
   const [paymentType, setPaymentType] = useState(1);
-  const [receipt, setReceipt] = useState('');
+  const [receipt, setReceipt] = useState<ReceiptData | null>(null);
 
-  const symbol = settings?.symbol || '$';
+  // Unknown-barcode quick add
+  const [quick, setQuick] = useState<{ code: string } | null>(null);
+  const [quickForm, setQuickForm] = useState({ name: '', price: '', quantity: '', category: '' });
+  const [quickBusy, setQuickBusy] = useState(false);
+
+  const symbol = settings?.symbol || 'د.ع';
   const taxRate = settings?.charge_tax ? Number(settings.percentage) || 0 : 0;
   const uploads = getUploadsBase();
+  const money = (n: number) => formatMoney(n, symbol);
 
   const refreshHolds = async () => {
     const list = await api.getOnHold();
@@ -84,33 +109,36 @@ export default function TillView({
 
   const filteredProducts = useMemo(() => {
     const q = query.trim().toLowerCase();
-    // While typing a barcode, keep the grid browsable by category only if empty query feels better
     return products.filter((p) => {
       const catOk = categoryFilter === 'all' || p.category === categoryFilter;
       if (!q) return catOk;
       return (
         catOk &&
-        (p.name.toLowerCase().includes(q) || String(p.id).includes(q))
+        (p.name.toLowerCase().includes(q) ||
+          String(p.id).includes(q) ||
+          (p.barcode || '').includes(q))
       );
     });
   }, [products, query, categoryFilter]);
 
+  const discountNum = parseMoney(discount);
   const subtotal = cart.reduce((sum, i) => sum + i.price * i.quantity, 0);
-  const afterDiscount = Math.max(0, subtotal - (Number(discount) || 0));
-  const tax = afterDiscount * (taxRate / 100);
-  const total = afterDiscount + tax;
+  const afterDiscount = Math.max(0, subtotal - discountNum);
+  const tax = roundMoney(afterDiscount * (taxRate / 100));
+  const total = roundMoney(afterDiscount + tax);
   const itemCount = cart.reduce((sum, i) => sum + i.quantity, 0);
+  const paidNum = parseMoney(paid);
 
   const stockLabel = (p: Product) => {
-    if (!p.stock) return { text: 'No stock limit', className: 'stock-badge' };
-    if (p.quantity <= 0) return { text: 'Out of stock', className: 'stock-badge out' };
-    if (p.quantity <= 5) return { text: `${p.quantity} left`, className: 'stock-badge low' };
-    return { text: `${p.quantity} in stock`, className: 'stock-badge' };
+    if (!p.stock) return { text: t('stock.noLimit'), className: 'stock-badge' };
+    if (p.quantity <= 0) return { text: t('stock.out'), className: 'stock-badge out' };
+    if (p.quantity <= 5) return { text: t('stock.left', { n: p.quantity }), className: 'stock-badge low' };
+    return { text: t('stock.inStock', { n: p.quantity }), className: 'stock-badge' };
   };
 
   const addToCart = (product: Product) => {
     if (product.stock && product.quantity <= 0) {
-      setError(`${product.name} is out of stock`);
+      setError(t('till.outOfStock', { name: product.name }));
       return;
     }
     setError(null);
@@ -118,7 +146,7 @@ export default function TillView({
       const existing = prev.find((i) => i.id === product.id);
       if (existing) {
         if (product.stock && existing.quantity >= product.quantity) {
-          setError(`Only ${product.quantity} available for ${product.name}`);
+          setError(t('till.onlyAvailable', { n: product.quantity, name: product.name }));
           return prev;
         }
         return prev.map((i) =>
@@ -130,7 +158,7 @@ export default function TillView({
         {
           id: product.id,
           name: product.name,
-          price: Number(product.price),
+          price: roundMoney(product.price),
           quantity: 1,
           stock: product.quantity,
         },
@@ -148,7 +176,7 @@ export default function TillView({
 
   const clearCart = () => {
     setCart([]);
-    setDiscount(0);
+    setDiscount('');
     setActiveHoldId(null);
     setCustomerId('0');
     setError(null);
@@ -174,11 +202,46 @@ export default function TillView({
         addToCart(local);
         setQuery('');
         scanRef.current?.focus();
+      } else if (looksLikeBarcode(code)) {
+        // Real barcode, not in the catalog: offer to register the product right here.
+        setQuickForm({ name: '', price: '', quantity: '', category: '' });
+        setQuick({ code });
+        setQuery('');
       } else {
-        setError(`No product for “${code}”`);
+        setError(t('till.noProduct', { code }));
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Scan failed');
+      setError(err instanceof Error ? err.message : t('till.scanFailed'));
+    }
+  };
+
+  const saveQuick = async (addAfter: boolean) => {
+    if (!quick) return;
+    if (!quickForm.name.trim() || !quickForm.price) {
+      setError(t('quick.nameRequired'));
+      return;
+    }
+    setQuickBusy(true);
+    setError(null);
+    try {
+      const fd = new FormData();
+      fd.append('id', '');
+      fd.append('name', quickForm.name.trim());
+      fd.append('barcode', quick.code);
+      fd.append('price', String(parseMoney(quickForm.price)));
+      fd.append('category', quickForm.category);
+      fd.append('quantity', quickForm.quantity || '0');
+      fd.append('stock', quickForm.quantity ? '1' : 'on');
+      fd.append('img', '');
+      const created = (await api.saveProduct(fd)) as Product | undefined;
+      await onRefresh();
+      setQuick(null);
+      if (addAfter && created && created.id) addToCart(created);
+      scanRef.current?.focus();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('till.saleFailed'));
+    } finally {
+      setQuickBusy(false);
     }
   };
 
@@ -187,12 +250,12 @@ export default function TillView({
     return {
       ref_number: status === 0 ? `H-${Date.now().toString().slice(-6)}` : '',
       customer: customerId,
-      customer_name: customer?.name || 'Walk-in',
+      customer_name: customer?.name || t('cust.walkIn'),
       status,
       user_id: user?._id || 0,
       user: user?.fullname || '',
       till: apiInfo?.till || settings?.till || 1,
-      discount: Number(discount) || 0,
+      discount: discountNum,
       subtotal,
       tax,
       total,
@@ -216,7 +279,7 @@ export default function TillView({
       clearCart();
       await refreshHolds();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not hold sale');
+      setError(err instanceof Error ? err.message : t('till.holdFailed'));
     }
   };
 
@@ -227,63 +290,40 @@ export default function TillView({
     setShowPay(true);
   };
 
-  const sanitizeTendered = (raw: string) => {
-    let next = raw.replace(/[^\d.]/g, '');
-    const firstDot = next.indexOf('.');
-    if (firstDot !== -1) {
-      next =
-        next.slice(0, firstDot + 1) + next.slice(firstDot + 1).replace(/\./g, '');
-      const [whole, dec = ''] = next.split('.');
-      next = `${whole}.${dec.slice(0, 2)}`;
-    }
-    return next;
-  };
-
   const completeSale = async () => {
-    const paidNum = parseFloat(paid) || 0;
-    if (paidNum + 0.0001 < total) {
-      setError('Amount tendered is less than total');
+    if (paidNum < total) {
+      setError(t('till.lessThanTotal'));
       return;
     }
     const changeAmt = Math.max(0, paidNum - total);
     const body = buildTransaction(1, paidNum, changeAmt);
     try {
+      let saved: { id?: number } | undefined;
       if (activeHoldId) {
         await api.updateTransaction({ ...body, _id: activeHoldId, ref_number: '' });
+        saved = { id: activeHoldId };
       } else {
-        await api.createTransaction(body);
+        saved = (await api.createTransaction(body)) as { id?: number } | undefined;
       }
-      const lines = [
-        settings?.store || 'Store POS',
-        settings?.address_one || '',
-        settings?.contact || '',
-        '--------------------------------',
-        ...cart.map(
-          (i) =>
-            `${i.quantity} x ${i.name}`.padEnd(22) +
-            `${symbol}${(i.price * i.quantity).toFixed(2)}`
-        ),
-        '--------------------------------',
-        `Subtotal ${symbol}${subtotal.toFixed(2)}`,
-        taxRate ? `Tax ${taxRate}% ${symbol}${tax.toFixed(2)}` : '',
-        discount ? `Discount -${symbol}${Number(discount).toFixed(2)}` : '',
-        `TOTAL ${symbol}${total.toFixed(2)}`,
-        `${paymentType === 3 ? 'Card' : 'Cash'} ${symbol}${paidNum.toFixed(2)}`,
-        `Change ${symbol}${changeAmt.toFixed(2)}`,
-        `Till ${apiInfo?.till || 1} · ${user?.fullname || ''}`,
-        settings?.footer || 'Thank you',
-        new Date().toLocaleString(),
-      ]
-        .filter(Boolean)
-        .join('\n');
-      setReceipt(lines);
+      setReceipt({
+        id: saved?.id,
+        items: cart,
+        subtotal,
+        tax,
+        discount: discountNum,
+        total,
+        paid: paidNum,
+        change: changeAmt,
+        method: paymentType === 3 ? t('pay.card') : t('pay.cash'),
+        date: new Date(),
+      });
       clearCart();
       setShowPay(false);
       await onRefresh();
       await refreshHolds();
       setTimeout(() => window.print(), 150);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Sale failed');
+      setError(err instanceof Error ? err.message : t('till.saleFailed'));
     }
   };
 
@@ -295,14 +335,14 @@ export default function TillView({
   const restoreHold = (order: Transaction) => {
     setCart(order.items || []);
     setCustomerId(String(order.customer || '0'));
-    setDiscount(order.discount || 0);
+    setDiscount(order.discount ? String(order.discount) : '');
     setActiveHoldId(order.id);
     setShowHolds(false);
     scanRef.current?.focus();
   };
 
   const discardHold = async (id: number) => {
-    if (!confirm('Delete this held sale?')) return;
+    if (!confirm(t('till.deleteHeld'))) return;
     await api.deleteTransaction(id);
     await refreshHolds();
   };
@@ -313,7 +353,7 @@ export default function TillView({
         <div className="error">
           {error}{' '}
           <button type="button" className="btn btn-ghost" onClick={() => setError(null)}>
-            dismiss
+            {t('common.dismiss')}
           </button>
         </div>
       )}
@@ -328,11 +368,11 @@ export default function TillView({
               onKeyDown={(e) => {
                 if (e.key === 'Enter') onScan();
               }}
-              placeholder="Scan barcode or search — Enter to add"
+              placeholder={t('till.scanPlaceholder')}
               autoFocus
             />
             <button type="button" className="btn btn-primary" onClick={onScan}>
-              Add
+              {t('till.add')}
             </button>
           </div>
           <div className="chips">
@@ -341,7 +381,7 @@ export default function TillView({
               className={`chip ${categoryFilter === 'all' ? 'active' : ''}`}
               onClick={() => setCategoryFilter('all')}
             >
-              All
+              {t('common.all')}
             </button>
             {categories.map((c) => (
               <button
@@ -376,17 +416,14 @@ export default function TillView({
                   )}
                   <div className="product-tile-body">
                     <strong>{p.name}</strong>
-                    <span className="price">
-                      {symbol}
-                      {Number(p.price).toFixed(2)}
-                    </span>
+                    <span className="price money">{money(p.price)}</span>
                     <span className={stock.className}>{stock.text}</span>
                   </div>
                 </button>
               );
             })}
             {!filteredProducts.length && (
-              <div className="empty">No products here. Add items in Catalog.</div>
+              <div className="empty">{t('till.noProducts')}</div>
             )}
           </div>
         </section>
@@ -400,7 +437,7 @@ export default function TillView({
               onCustomersChanged={onRefresh}
             />
             <button type="button" className="btn" onClick={openHolds}>
-              Held {holdCount ? `(${holdCount})` : ''}
+              {t('till.held')} {holdCount ? `(${holdCount})` : ''}
               <span className="kbd">F4</span>
             </button>
           </div>
@@ -410,10 +447,7 @@ export default function TillView({
               <div className="cart-row" key={item.id}>
                 <div>
                   <strong>{item.name}</strong>
-                  <div className="muted">
-                    {symbol}
-                    {item.price.toFixed(2)} each
-                  </div>
+                  <div className="muted">{t('till.each', { price: money(item.price) })}</div>
                 </div>
                 <div className="qty">
                   <button type="button" onClick={() => setQty(item.id, item.quantity - 1)}>
@@ -424,61 +458,45 @@ export default function TillView({
                     +
                   </button>
                 </div>
-                <strong>
-                  {symbol}
-                  {(item.price * item.quantity).toFixed(2)}
-                </strong>
+                <strong className="money">{money(item.price * item.quantity)}</strong>
               </div>
             ))}
-            {!cart.length && (
-              <div className="empty">Cart empty — scan or tap a product</div>
-            )}
+            {!cart.length && <div className="empty">{t('till.cartEmpty')}</div>}
           </div>
 
           <div className="totals">
             <div className="field" style={{ marginBottom: 0 }}>
-              <label>Discount ({symbol})</label>
+              <label>{t('till.discount', { symbol })}</label>
               <input
-                type="number"
-                min={0}
-                step="0.01"
-                value={discount}
-                onChange={(e) => setDiscount(Number(e.target.value))}
+                inputMode="numeric"
+                className="num-ltr"
+                value={discount ? formatNumber(discountNum) : ''}
+                onChange={(e) => setDiscount(String(parseMoney(e.target.value) || ''))}
+                placeholder="0"
               />
             </div>
             <div className="row">
-              <span>
-                {itemCount} item{itemCount === 1 ? '' : 's'}
-              </span>
-              <span>
-                {symbol}
-                {subtotal.toFixed(2)}
-              </span>
+              <span>{itemCount === 1 ? t('till.item') : t('till.items', { n: itemCount })}</span>
+              <span className="money">{money(subtotal)}</span>
             </div>
             {!!taxRate && (
               <div className="row">
-                <span>Tax {taxRate}%</span>
-                <span>
-                  {symbol}
-                  {tax.toFixed(2)}
-                </span>
+                <span>{t('till.tax', { rate: taxRate })}</span>
+                <span className="money">{money(tax)}</span>
               </div>
             )}
             <div className="row grand">
-              <span>Total</span>
-              <span>
-                {symbol}
-                {total.toFixed(2)}
-              </span>
+              <span>{t('till.total')}</span>
+              <span className="money">{money(total)}</span>
             </div>
           </div>
 
           <div className="cart-actions">
             <button type="button" className="btn" onClick={clearCart} disabled={!cart.length}>
-              Clear
+              {t('till.clear')}
             </button>
             <button type="button" className="btn" onClick={holdSale} disabled={!cart.length}>
-              Hold
+              {t('till.hold')}
             </button>
             <button
               type="button"
@@ -486,60 +504,132 @@ export default function TillView({
               onClick={openPay}
               disabled={!cart.length}
             >
-              Charge {symbol}
-              {total.toFixed(2)}
+              {t('till.charge', { amount: money(total) })}
               <span className="kbd">F2</span>
             </button>
           </div>
         </section>
       </div>
 
-      <pre id="receipt-print" className="receipt" style={{ display: receipt ? 'block' : 'none' }}>
-        {receipt}
-      </pre>
+      {/* Printed receipt (80mm). Hidden on screen, shown by the @media print rules. */}
+      <div id="receipt-print" className="receipt" style={{ display: 'none' }}>
+        {receipt && (
+          <>
+            <h2>{settings?.store || t('app.name')}</h2>
+            {settings?.address_one && <p className="r-center r-muted">{settings.address_one}</p>}
+            {settings?.contact && <p className="r-center r-muted num-ltr">{settings.contact}</p>}
+            <hr />
+            <div className="r-row r-muted">
+              <span>{receipt.id ? t('receipt.no', { n: receipt.id }) : ''}</span>
+              <span className="num-ltr">{formatDateTime(receipt.date)}</span>
+            </div>
+            <hr />
+            <table>
+              <thead>
+                <tr>
+                  <th>{t('receipt.item')}</th>
+                  <th className="num">{t('receipt.qty')}</th>
+                  <th className="num">{t('receipt.amount')}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {receipt.items.map((i) => (
+                  <tr key={i.id}>
+                    <td>{i.name}</td>
+                    <td className="num">{i.quantity}</td>
+                    <td className="num">{formatNumber(i.price * i.quantity)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <hr />
+            {(receipt.discount > 0 || receipt.tax > 0) && (
+              <div className="r-row">
+                <span>{t('receipt.subtotal')}</span>
+                <span className="money">{money(receipt.subtotal)}</span>
+              </div>
+            )}
+            {receipt.discount > 0 && (
+              <div className="r-row">
+                <span>{t('receipt.discount')}</span>
+                <span className="money">-{money(receipt.discount)}</span>
+              </div>
+            )}
+            {receipt.tax > 0 && (
+              <div className="r-row">
+                <span>{t('receipt.tax', { rate: taxRate })}</span>
+                <span className="money">{money(receipt.tax)}</span>
+              </div>
+            )}
+            <div className="r-row r-total">
+              <span>{t('receipt.total')}</span>
+              <span className="money">{money(receipt.total)}</span>
+            </div>
+            <div className="r-row">
+              <span>{t('receipt.paid', { method: receipt.method })}</span>
+              <span className="money">{money(receipt.paid)}</span>
+            </div>
+            <div className="r-row">
+              <span>{t('receipt.change')}</span>
+              <span className="money">{money(receipt.change)}</span>
+            </div>
+            <hr />
+            <p className="r-center r-muted">
+              {t('receipt.till', { n: apiInfo?.till || 1, user: user?.fullname || '' })}
+            </p>
+            <p className="r-center">{settings?.footer || t('receipt.thanks')}</p>
+          </>
+        )}
+      </div>
 
       <Modal
-        title="Payment"
+        title={t('pay.title')}
         open={showPay}
         onClose={() => setShowPay(false)}
         compact
         footer={
           <>
             <button type="button" className="btn" onClick={() => setShowPay(false)}>
-              Cancel
+              {t('common.cancel')}
             </button>
-            <button type="button" className="btn btn-primary" onClick={completeSale}>
-              Pay
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={completeSale}
+              disabled={paidNum < total}
+            >
+              {t('pay.pay')}
             </button>
           </>
         }
       >
         <div className="field">
-          <label>Method</label>
+          <label>{t('pay.method')}</label>
           <select
             value={paymentType}
             onChange={(e) => {
               const type = Number(e.target.value);
               setPaymentType(type);
-              if (type === 3) setPaid(total.toFixed(2));
+              if (type === 3) setPaid(String(total));
               else setPaid('');
             }}
           >
-            <option value={1}>Cash</option>
-            <option value={3}>Card</option>
+            <option value={1}>{t('pay.cash')}</option>
+            <option value={3}>{t('pay.card')}</option>
           </select>
         </div>
-        <div className="pay-due">
-          Due {symbol}
-          {total.toFixed(2)}
-        </div>
+        <div className="pay-due money">{t('pay.due', { amount: money(total) })}</div>
         <div className="field">
-          <label>Tendered</label>
+          <label>{t('pay.tendered')}</label>
           <input
-            value={paid}
-            onChange={(e) => setPaid(sanitizeTendered(e.target.value))}
-            placeholder={paymentType === 1 ? 'Enter amount received' : total.toFixed(2)}
-            inputMode="decimal"
+            className="num-ltr"
+            value={paid ? formatNumber(paidNum) : ''}
+            onChange={(e) => setPaid(String(parseMoney(e.target.value) || ''))}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && paidNum >= total) completeSale();
+            }}
+            placeholder={paymentType === 1 ? t('pay.enterAmount') : formatNumber(total)}
+            inputMode="numeric"
             autoFocus
             readOnly={paymentType === 3}
           />
@@ -548,23 +638,98 @@ export default function TillView({
           <PaymentPad value={paid} onChange={setPaid} due={total} symbol={symbol} />
         )}
         <p className="pay-change">
-          {(parseFloat(paid) || 0) + 0.0001 < total ? 'Still due' : 'Change'}{' '}
-          <strong>
-            {symbol}
-            {Math.abs((parseFloat(paid) || 0) - total).toFixed(2)}
-          </strong>
+          {paidNum < total ? t('pay.stillDue') : t('pay.change')}{' '}
+          <strong className="money">{money(Math.abs(paidNum - total))}</strong>
         </p>
       </Modal>
 
-      <Modal title="Held sales" open={showHolds} onClose={() => setShowHolds(false)} wide>
+      <Modal
+        title={t('quick.title')}
+        open={!!quick}
+        onClose={() => setQuick(null)}
+        footer={
+          <>
+            <button type="button" className="btn" onClick={() => setQuick(null)}>
+              {t('common.cancel')}
+            </button>
+            <button type="button" className="btn" disabled={quickBusy} onClick={() => saveQuick(false)}>
+              {t('quick.saveOnly')}
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={quickBusy}
+              onClick={() => saveQuick(true)}
+            >
+              {t('quick.saveAndAdd')}
+            </button>
+          </>
+        }
+      >
+        {quick && (
+          <>
+            <p className="muted" style={{ marginTop: 0 }}>
+              <strong className="barcode">{quick.code}</strong> — {t('quick.intro')}
+            </p>
+            <div className="field">
+              <label>{t('quick.name')}</label>
+              <input
+                value={quickForm.name}
+                onChange={(e) => setQuickForm({ ...quickForm, name: e.target.value })}
+                autoFocus
+              />
+            </div>
+            <div className="field">
+              <label>{t('quick.price', { symbol })}</label>
+              <input
+                inputMode="numeric"
+                className="num-ltr"
+                value={quickForm.price ? formatNumber(parseMoney(quickForm.price)) : ''}
+                onChange={(e) =>
+                  setQuickForm({ ...quickForm, price: String(parseMoney(e.target.value) || '') })
+                }
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') saveQuick(true);
+                }}
+              />
+            </div>
+            <div className="field">
+              <label>{t('quick.qty')}</label>
+              <input
+                type="number"
+                min={0}
+                className="num-ltr"
+                value={quickForm.quantity}
+                onChange={(e) => setQuickForm({ ...quickForm, quantity: e.target.value })}
+              />
+            </div>
+            <div className="field">
+              <label>{t('quick.category')}</label>
+              <select
+                value={quickForm.category}
+                onChange={(e) => setQuickForm({ ...quickForm, category: e.target.value })}
+              >
+                <option value="">{t('common.none')}</option>
+                {categories.map((c) => (
+                  <option key={c.id} value={c.name}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </>
+        )}
+      </Modal>
+
+      <Modal title={t('holds.title')} open={showHolds} onClose={() => setShowHolds(false)} wide>
         <table className="table">
           <thead>
             <tr>
-              <th>Ref</th>
-              <th>Customer</th>
-              <th>Items</th>
-              <th>Total</th>
-              <th>When</th>
+              <th>{t('holds.ref')}</th>
+              <th>{t('holds.customer')}</th>
+              <th>{t('holds.items')}</th>
+              <th>{t('holds.total')}</th>
+              <th>{t('holds.when')}</th>
               <th />
             </tr>
           </thead>
@@ -574,24 +739,21 @@ export default function TillView({
                 <td>{h.ref_number || h.id}</td>
                 <td>{h.customer_name}</td>
                 <td>{(h.items || []).reduce((n, i) => n + i.quantity, 0)}</td>
-                <td>
-                  {symbol}
-                  {Number(h.total).toFixed(2)}
-                </td>
-                <td>{new Date(h.date).toLocaleString()}</td>
+                <td className="money">{money(Number(h.total))}</td>
+                <td className="num-ltr">{formatDateTime(h.date)}</td>
                 <td>
                   <button type="button" className="btn btn-primary" onClick={() => restoreHold(h)}>
-                    Resume
+                    {t('holds.resume')}
                   </button>{' '}
                   <button type="button" className="btn btn-danger" onClick={() => discardHold(h.id)}>
-                    Delete
+                    {t('common.delete')}
                   </button>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
-        {!holds.length && <div className="empty">No held sales</div>}
+        {!holds.length && <div className="empty">{t('holds.empty')}</div>}
       </Modal>
     </>
   );

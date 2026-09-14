@@ -26,11 +26,16 @@ export default function inventoryRouter(uploadsPath) {
     res.json(mapProduct(row));
   });
 
+  // Scanner lookup: barcode first (exact), then legacy id / exact name.
   router.post('/product/sku', (req, res) => {
-    const sku = req.body?.skuCode;
-    const row = getDb()
+    const sku = String(req.body?.skuCode || '').trim();
+    if (!sku) return res.json(null);
+    const db = getDb();
+    const byBarcode = db.prepare('SELECT * FROM products WHERE barcode = ?').get(sku);
+    if (byBarcode) return res.json(mapProduct(byBarcode));
+    const row = db
       .prepare('SELECT * FROM products WHERE id = ? OR name = ?')
-      .get(parseInt(sku, 10) || -1, String(sku || ''));
+      .get(parseInt(sku, 10) || -1, sku);
     res.json(mapProduct(row));
   });
 
@@ -58,21 +63,28 @@ export default function inventoryRouter(uploadsPath) {
 
       const stock = body.stock === 'on' || body.stock === 0 || body.stock === '0' ? 0 : 1;
       const quantity = body.quantity === '' || body.quantity == null ? 0 : parseInt(body.quantity, 10);
+      const barcode = String(body.barcode || '').trim();
+      // IQD has no usable sub-unit: prices are whole dinars.
+      const price = Math.round(parseFloat(body.price) || 0);
+
+      if (barcode) {
+        const clash = getDb()
+          .prepare('SELECT id, name FROM products WHERE barcode = ? AND id != ?')
+          .get(barcode, parseInt(body.id, 10) || -1);
+        if (clash) {
+          return res
+            .status(409)
+            .json({ error: `BARCODE_TAKEN:${clash.name}` });
+        }
+      }
 
       if (!body.id) {
         const result = getDb()
           .prepare(
-            `INSERT INTO products (name, price, category, quantity, stock, img)
-             VALUES (?, ?, ?, ?, ?, ?)`
+            `INSERT INTO products (name, price, category, quantity, stock, img, barcode)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`
           )
-          .run(
-            body.name,
-            parseFloat(body.price) || 0,
-            body.category || '',
-            quantity,
-            stock,
-            image
-          );
+          .run(body.name, price, body.category || '', quantity, stock, image, barcode);
         const row = getDb().prepare('SELECT * FROM products WHERE id = ?').get(result.lastInsertRowid);
         return res.json(mapProduct(row));
       }
@@ -80,18 +92,10 @@ export default function inventoryRouter(uploadsPath) {
       const id = parseInt(body.id, 10);
       getDb()
         .prepare(
-          `UPDATE products SET name = ?, price = ?, category = ?, quantity = ?, stock = ?, img = ?
+          `UPDATE products SET name = ?, price = ?, category = ?, quantity = ?, stock = ?, img = ?, barcode = ?
            WHERE id = ?`
         )
-        .run(
-          body.name,
-          parseFloat(body.price) || 0,
-          body.category || '',
-          quantity,
-          stock,
-          image,
-          id
-        );
+        .run(body.name, price, body.category || '', quantity, stock, image, barcode, id);
       res.sendStatus(200);
     }
   );

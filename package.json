@@ -1,7 +1,7 @@
 {
-  "name": "store-pos",
+  "name": "store-pos-iq",
   "version": "2.0.0",
-  "description": "Modern desktop Point of Sale with LAN multi-terminal support",
+  "description": "Offline Point of Sale for Iraqi shops — Arabic UI, IQD, barcode scanning (fork of tngoman/Store-POS)",
   "author": "Hosting Domain",
   "private": true,
   "main": "electron/main.js",
@@ -12,11 +12,13 @@
     "start": "electron .",
     "preview": "vite preview",
     "smoke": "node scripts/smoke-api.mjs && node scripts/smoke-lan.mjs",
-    "dist": "vite build && electron-builder --win"
+    "dist": "vite build && electron-builder --win",
+    "dev:web": "concurrently -k \"node scripts/dev-api.mjs\" \"vite\"",
+    "dev:api": "node scripts/dev-api.mjs"
   },
   "build": {
-    "appId": "com.storepos.app",
-    "productName": "Store POS",
+    "appId": "iq.storepos.app",
+    "productName": "نقطة البيع",
     "copyright": "Copyright © Hosting Domain",
     "directories": {
       "output": "release",
@@ -50,7 +52,7 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Store POS",
+      "shortcutName": "نقطة البيع",
       "installerIcon": "build/icon.ico",
       "uninstallerIcon": "build/icon.ico",
       "installerHeaderIcon": "build/icon.ico"

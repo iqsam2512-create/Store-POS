@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { api, Settings } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { getPosBridge } from '../bridge';
+import { Key, useT } from '../i18n';
 import PhotoPicker from '../components/PhotoPicker';
 
 type Props = {
@@ -17,6 +18,7 @@ const MODES = [
 
 export default function SettingsView({ settings, onSaved }: Props) {
   const { apiInfo, refreshApiInfo } = useAuth();
+  const { t, lang, setLang } = useT();
   const [form, setForm] = useState({
     app: MODES[0] as string,
     store: '',
@@ -24,7 +26,7 @@ export default function SettingsView({ settings, onSaved }: Props) {
     address_two: '',
     contact: '',
     tax: '',
-    symbol: '$',
+    symbol: 'د.ع',
     percentage: '0',
     charge_tax: false,
     footer: '',
@@ -50,7 +52,7 @@ export default function SettingsView({ settings, onSaved }: Props) {
         address_two: s?.address_two || '',
         contact: s?.contact || '',
         tax: s?.tax || '',
-        symbol: s?.symbol || '$',
+        symbol: s?.symbol || 'د.ع',
         percentage: String(s?.percentage ?? 0),
         charge_tax: !!s?.charge_tax,
         footer: s?.footer || '',
@@ -78,21 +80,18 @@ export default function SettingsView({ settings, onSaved }: Props) {
         till: parseInt(form.till, 10) || 1,
       });
 
-      if (form.app !== 'Network Point of Sale Terminal') {
+      try {
         await api.saveSettings(fd);
-      } else {
-        try {
-          await api.saveSettings(fd);
-        } catch {
-          /* local prefs still saved */
-        }
+      } catch (err) {
+        // A terminal has no local DB; local prefs are still saved.
+        if (form.app !== 'Network Point of Sale Terminal') throw err;
       }
 
-      setMessage('Saved. Restart the app if you changed Standalone / Server / Terminal mode.');
+      setMessage(t('set.saved'));
       await refreshApiInfo();
       await onSaved();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Save failed');
+      setError(err instanceof Error ? err.message : t('set.saveFailed'));
     }
   };
 
@@ -105,32 +104,32 @@ export default function SettingsView({ settings, onSaved }: Props) {
     setDemoBusy(true);
     try {
       const result = await api.seedDemo();
-      setMessage(result.message);
+      setMessage(
+        t('cat.seeded', {
+          p: result.productsAdded,
+          c: result.categoriesAdded,
+          u: result.customersAdded,
+        })
+      );
       await onSaved();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Seed failed');
+      setError(err instanceof Error ? err.message : t('cat.seedFailed'));
     } finally {
       setDemoBusy(false);
     }
   };
 
   const clearDemo = async () => {
-    if (
-      !confirm(
-        'Delete ALL products, categories, sales history, and customers (except Walk-in)? This cannot be undone.'
-      )
-    ) {
-      return;
-    }
+    if (!confirm(t('set.wipeConfirm'))) return;
     setError(null);
     setMessage(null);
     setDemoBusy(true);
     try {
-      const result = await api.clearDemo();
-      setMessage(result.message);
+      await api.clearDemo();
+      setMessage(t('set.cleared'));
       await onSaved();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Clear failed');
+      setError(err instanceof Error ? err.message : t('set.clearFailed'));
     } finally {
       setDemoBusy(false);
     }
@@ -143,44 +142,47 @@ export default function SettingsView({ settings, onSaved }: Props) {
 
       <div className="page-grid">
         <div>
-          <h3 style={{ marginTop: 0 }}>Store</h3>
+          <h3 style={{ marginTop: 0 }}>{t('set.store')}</h3>
           <div className="field">
-            <label>Store name</label>
+            <label>{t('set.storeName')}</label>
             <input
               value={form.store}
               onChange={(e) => setForm({ ...form, store: e.target.value })}
             />
           </div>
           <div className="field">
-            <label>Address</label>
+            <label>{t('set.address')}</label>
             <input
               value={form.address_one}
               onChange={(e) => setForm({ ...form, address_one: e.target.value })}
             />
           </div>
           <div className="field">
-            <label>Address line 2</label>
+            <label>{t('set.address2')}</label>
             <input
               value={form.address_two}
               onChange={(e) => setForm({ ...form, address_two: e.target.value })}
             />
           </div>
           <div className="field">
-            <label>Contact</label>
+            <label>{t('set.contact')}</label>
             <input
               value={form.contact}
               onChange={(e) => setForm({ ...form, contact: e.target.value })}
+              dir="ltr"
+              inputMode="tel"
             />
           </div>
           <div className="field">
-            <label>Receipt footer</label>
+            <label>{t('set.footer')}</label>
             <input
               value={form.footer}
               onChange={(e) => setForm({ ...form, footer: e.target.value })}
+              placeholder={t('receipt.thanks')}
             />
           </div>
           <PhotoPicker
-            label="Store logo"
+            label={t('set.logo')}
             value={form.img}
             onChange={(img) => setForm({ ...form, img })}
             suggestedQuery={form.store || 'store logo'}
@@ -188,43 +190,52 @@ export default function SettingsView({ settings, onSaved }: Props) {
         </div>
 
         <div>
-          <h3 style={{ marginTop: 0 }}>Register</h3>
+          <h3 style={{ marginTop: 0 }}>{t('set.register')}</h3>
           <div className="field">
-            <label>Mode</label>
+            <label>{t('set.language')}</label>
+            <select value={lang} onChange={(e) => setLang(e.target.value as 'ar' | 'en')}>
+              <option value="ar">العربية</option>
+              <option value="en">English</option>
+            </select>
+          </div>
+          <div className="field">
+            <label>{t('set.mode')}</label>
             <select value={form.app} onChange={(e) => setForm({ ...form, app: e.target.value })}>
               {MODES.map((m) => (
                 <option key={m} value={m}>
-                  {m.replace(' Point of Sale', '')}
+                  {t(`mode.${m.replace(' Point of Sale', '')}` as Key)}
                 </option>
               ))}
             </select>
           </div>
           {isTerminal && (
             <div className="field">
-              <label>Server IP</label>
+              <label>{t('set.serverIp')}</label>
               <input
                 value={form.ip}
                 onChange={(e) => setForm({ ...form, ip: e.target.value })}
                 placeholder="192.168.1.10"
+                dir="ltr"
               />
             </div>
           )}
           {isServer && (
             <p className="muted">
-              Terminals should connect to <strong>{lanIp}</strong> on port 8001.
+              {t('set.terminalsConnect')} <strong className="num-ltr">{lanIp}</strong>
             </p>
           )}
           <div className="field">
-            <label>Till number</label>
+            <label>{t('set.tillNumber')}</label>
             <input
               type="number"
               min={1}
+              className="num-ltr"
               value={form.till}
               onChange={(e) => setForm({ ...form, till: e.target.value })}
             />
           </div>
           <div className="field">
-            <label>Currency symbol</label>
+            <label>{t('set.symbol')}</label>
             <input
               value={form.symbol}
               onChange={(e) => setForm({ ...form, symbol: e.target.value })}
@@ -238,24 +249,24 @@ export default function SettingsView({ settings, onSaved }: Props) {
               checked={form.charge_tax}
               onChange={(e) => setForm({ ...form, charge_tax: e.target.checked })}
             />
-            Charge tax on sales
+            {t('set.chargeTax')}
           </label>
           {form.charge_tax && (
             <>
               <div className="field">
-                <label>Tax label</label>
+                <label>{t('set.taxLabel')}</label>
                 <input
                   value={form.tax}
                   onChange={(e) => setForm({ ...form, tax: e.target.value })}
-                  placeholder="VAT"
                 />
               </div>
               <div className="field">
-                <label>Tax %</label>
+                <label>{t('set.taxPct')}</label>
                 <input
                   type="number"
                   min={0}
-                  step="0.01"
+                  step="0.5"
+                  className="num-ltr"
                   value={form.percentage}
                   onChange={(e) => setForm({ ...form, percentage: e.target.value })}
                 />
@@ -263,49 +274,47 @@ export default function SettingsView({ settings, onSaved }: Props) {
             </>
           )}
           {apiInfo && (
-            <p className="muted" style={{ fontSize: '0.85rem' }}>
+            <p className="muted num-ltr" style={{ fontSize: '0.85rem' }}>
               API {apiInfo.baseUrl}
             </p>
           )}
 
-          <h3>Media</h3>
+          <h3>{t('set.media')}</h3>
           <div className="field">
-            <label>Pexels API key</label>
+            <label>{t('set.pexelsKey')}</label>
             <input
               type="password"
               value={form.pexels_api_key}
               onChange={(e) => setForm({ ...form, pexels_api_key: e.target.value })}
-              placeholder="Paste key from pexels.com/api"
+              placeholder={t('set.pexelsPlaceholder')}
               autoComplete="off"
+              dir="ltr"
             />
           </div>
           <p className="muted" style={{ fontSize: '0.85rem' }}>
-            Used to search and download product photos into a local library on this server.
-            Get a free key at{' '}
-            <a href="https://www.pexels.com/api/" target="_blank" rel="noreferrer">
+            {t('set.pexelsHelp')}{' '}
+            <a href="https://www.pexels.com/api/" target="_blank" rel="noreferrer" dir="ltr">
               pexels.com/api
             </a>
-            .
           </p>
         </div>
       </div>
 
       <button type="button" className="btn btn-primary" onClick={save} style={{ marginTop: '1rem' }}>
-        Save settings
+        {t('set.save')}
       </button>
 
       <div style={{ marginTop: '1.75rem', paddingTop: '1.25rem', borderTop: '1px solid var(--line)' }}>
-        <h3 style={{ marginTop: 0 }}>Demo data</h3>
+        <h3 style={{ marginTop: 0 }}>{t('set.demo')}</h3>
         <p className="muted" style={{ fontSize: '0.9rem', marginTop: 0 }}>
-          Seed a sample South African catalog (categories, products, customers), or wipe catalog and
-          sales data for a clean slate. Staff and settings are kept.
+          {t('set.demoHelp')}
         </p>
         <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
           <button type="button" className="btn" disabled={demoBusy} onClick={seedDemo}>
-            Seed demo catalog
+            {t('set.seed')}
           </button>
           <button type="button" className="btn btn-danger" disabled={demoBusy} onClick={clearDemo}>
-            Bulk delete catalog &amp; sales
+            {t('set.wipe')}
           </button>
         </div>
       </div>

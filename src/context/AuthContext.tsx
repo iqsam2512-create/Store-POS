@@ -42,10 +42,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       await healthCheck(info.healthUrl);
       setServerError(null);
     } catch {
+      // Stored as an i18n key + the IP; LoginPage renders it in the active language.
       setServerError(
         info.mode === 'Network Point of Sale Terminal'
-          ? `Cannot reach server at ${info.serverIp || '(no IP set)'}. Check Network Server IP in settings.`
-          : 'Local API server is not responding. Prefer the Electron app window from `npm run dev`.'
+          ? `err.terminalUnreachable|${info.serverIp || ''}`
+          : 'err.localApi'
       );
     }
     return info;

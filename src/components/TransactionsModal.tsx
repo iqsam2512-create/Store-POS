@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api, Transaction, User } from '../api/client';
+import { useT } from '../i18n';
+import { formatDateTime, formatMoney } from '../money';
 import Modal from './Modal';
 
 type Props = {
@@ -25,8 +27,8 @@ function localInputToIso(value: string, endOfMinute = false) {
 }
 
 function defaultRange() {
+  // Default to today: that's the question a shop owner asks first.
   const start = new Date();
-  start.setDate(1);
   start.setHours(0, 0, 0, 0);
   const end = new Date();
   end.setHours(23, 59, 0, 0);
@@ -39,6 +41,7 @@ export default function TransactionsModal({
   onClose,
   symbol,
 }: Props) {
+  const { t } = useT();
   const initial = defaultRange();
   const [rows, setRows] = useState<Transaction[]>([]);
   const [users, setUsers] = useState<User[]>([]);
@@ -67,7 +70,7 @@ export default function TransactionsModal({
       setRows(list);
       setUsers(allUsers);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load');
+      setError(err instanceof Error ? err.message : t('sales.loadFailed'));
     } finally {
       setLoading(false);
     }
@@ -78,22 +81,24 @@ export default function TransactionsModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- load on open; Filter button refreshes
   }, [open, embedded]);
 
+  const sum = rows.reduce((n, r) => n + Number(r.total || 0), 0);
+
   const body = (
     <>
       {error && <div className="error">{error}</div>}
       <div className="filters">
         <div className="field">
-          <label>From</label>
-          <input type="datetime-local" value={start} onChange={(e) => setStart(e.target.value)} />
+          <label>{t('sales.from')}</label>
+          <input type="datetime-local" value={start} onChange={(e) => setStart(e.target.value)} dir="ltr" />
         </div>
         <div className="field">
-          <label>To</label>
-          <input type="datetime-local" value={end} onChange={(e) => setEnd(e.target.value)} />
+          <label>{t('sales.to')}</label>
+          <input type="datetime-local" value={end} onChange={(e) => setEnd(e.target.value)} dir="ltr" />
         </div>
         <div className="field">
-          <label>Cashier</label>
+          <label>{t('sales.cashier')}</label>
           <select value={userId} onChange={(e) => setUserId(Number(e.target.value))}>
-            <option value={0}>All</option>
+            <option value={0}>{t('common.all')}</option>
             {users.map((u) => (
               <option key={u.id} value={u.id}>
                 {u.fullname}
@@ -102,60 +107,60 @@ export default function TransactionsModal({
           </select>
         </div>
         <div className="field">
-          <label>Till</label>
+          <label>{t('sales.till')}</label>
           <input
             type="number"
             min={0}
+            className="num-ltr"
             value={till}
             onChange={(e) => setTill(Number(e.target.value))}
           />
         </div>
         <div className="field">
-          <label>Status</label>
+          <label>{t('sales.status')}</label>
           <select value={status} onChange={(e) => setStatus(Number(e.target.value))}>
-            <option value={1}>Paid</option>
-            <option value={0}>Unpaid / Hold</option>
+            <option value={1}>{t('sales.paid')}</option>
+            <option value={0}>{t('sales.unpaid')}</option>
           </select>
         </div>
         <button className="btn btn-primary" type="button" onClick={load} disabled={loading}>
-          {loading ? 'Loading…' : 'Filter'}
+          {loading ? t('common.loading') : t('sales.filter')}
         </button>
       </div>
+      {rows.length > 0 && (
+        <p className="muted" style={{ margin: '0 0 0.5rem' }}>
+          {t('sales.sum', { n: rows.length, amount: formatMoney(sum, symbol) })}
+        </p>
+      )}
       <table className="table">
         <thead>
           <tr>
-            <th>ID</th>
-            <th>Date</th>
-            <th>Cashier</th>
-            <th>Till</th>
-            <th>Customer</th>
-            <th>Total</th>
-            <th>Paid</th>
-            <th>Status</th>
+            <th>{t('sales.colId')}</th>
+            <th>{t('sales.colDate')}</th>
+            <th>{t('sales.cashier')}</th>
+            <th>{t('sales.till')}</th>
+            <th>{t('sales.colCustomer')}</th>
+            <th>{t('sales.colTotal')}</th>
+            <th>{t('sales.colPaid')}</th>
+            <th>{t('sales.status')}</th>
           </tr>
         </thead>
         <tbody>
           {rows.map((r) => (
             <tr key={r.id}>
-              <td>{r.id}</td>
-              <td>{new Date(r.date).toLocaleString()}</td>
+              <td className="num-ltr">{r.id}</td>
+              <td className="num-ltr">{formatDateTime(r.date)}</td>
               <td>{r.user}</td>
-              <td>{r.till}</td>
+              <td className="num-ltr">{r.till}</td>
               <td>{r.customer_name}</td>
-              <td>
-                {symbol}
-                {Number(r.total).toFixed(2)}
-              </td>
-              <td>
-                {symbol}
-                {Number(r.paid).toFixed(2)}
-              </td>
-              <td>{r.status === 1 ? 'Paid' : 'Open'}</td>
+              <td className="money">{formatMoney(Number(r.total), symbol)}</td>
+              <td className="money">{formatMoney(Number(r.paid), symbol)}</td>
+              <td>{r.status === 1 ? t('sales.paid') : t('sales.open')}</td>
             </tr>
           ))}
         </tbody>
       </table>
-      {!rows.length && !loading && <div className="empty">No transactions in this range</div>}
+      {!rows.length && !loading && <div className="empty">{t('sales.empty')}</div>}
     </>
   );
 
@@ -163,9 +168,9 @@ export default function TransactionsModal({
     return (
       <div className="panel" style={{ padding: '1rem' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
-          <strong>Transactions</strong>
+          <strong>{t('sales.title')}</strong>
           <button className="btn" type="button" onClick={onClose}>
-            Back to till
+            {t('sales.back')}
           </button>
         </div>
         {body}
@@ -174,7 +179,7 @@ export default function TransactionsModal({
   }
 
   return (
-    <Modal title="Transactions" open={open} onClose={onClose} wide>
+    <Modal title={t('sales.title')} open={open} onClose={onClose} wide>
       {body}
     </Modal>
   );

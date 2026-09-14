@@ -1,6 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api, Category, Product, getUploadsBase } from '../api/client';
 import PhotoPicker from '../components/PhotoPicker';
+import { useT } from '../i18n';
+import { formatMoney, formatNumber, parseMoney } from '../money';
 
 type Props = {
   products: Product[];
@@ -14,6 +16,7 @@ type Props = {
 const emptyProduct = {
   id: '',
   name: '',
+  barcode: '',
   price: '',
   category: '',
   quantity: '0',
@@ -29,6 +32,7 @@ export default function CatalogView({
   canCategories,
   onChanged,
 }: Props) {
+  const { t } = useT();
   const [tab, setTab] = useState<'products' | 'categories'>(
     canProducts ? 'products' : 'categories'
   );
@@ -38,9 +42,12 @@ export default function CatalogView({
   const [catName, setCatName] = useState('');
   const [editCatId, setEditCatId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [filter, setFilter] = useState('');
   const [selected, setSelected] = useState<number[]>([]);
   const [busy, setBusy] = useState(false);
+  const barcodeRef = useRef<HTMLInputElement>(null);
+  const nameRef = useRef<HTMLInputElement>(null);
   const uploads = getUploadsBase();
 
   useEffect(() => {
@@ -51,28 +58,42 @@ export default function CatalogView({
 
   const saveProduct = async () => {
     if (!form.name.trim()) {
-      setError('Name is required');
+      setError(t('cat.nameRequired'));
       return;
     }
     setError(null);
     const fd = new FormData();
     fd.append('id', form.id);
     fd.append('name', form.name.trim());
-    fd.append('price', form.price || '0');
+    fd.append('barcode', form.barcode.trim());
+    fd.append('price', String(parseMoney(form.price)));
     fd.append('category', form.category);
     fd.append('quantity', form.quantity || '0');
     fd.append('stock', form.trackStock ? '1' : 'on');
     fd.append('img', form.img);
-    await api.saveProduct(fd);
+    try {
+      await api.saveProduct(fd);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '';
+      if (msg.startsWith('BARCODE_TAKEN:')) {
+        setError(t('cat.barcodeTaken', { name: msg.slice('BARCODE_TAKEN:'.length) }));
+      } else {
+        setError(msg || t('team.saveFailed'));
+      }
+      return;
+    }
     setForm(emptyProduct);
     await onChanged();
+    // Back to the barcode box: stocking a shelf is scan → name → price → Enter, repeat.
+    barcodeRef.current?.focus();
   };
 
   const editProduct = (p: Product) => {
     setForm({
       id: String(p.id),
       name: p.name,
-      price: String(p.price),
+      barcode: p.barcode || '',
+      price: String(Math.round(Number(p.price))),
       category: p.category,
       quantity: String(p.quantity),
       trackStock: !!p.stock,
@@ -82,7 +103,7 @@ export default function CatalogView({
   };
 
   const removeProduct = async (id: number) => {
-    if (!confirm('Delete this product?')) return;
+    if (!confirm(t('cat.deleteProduct'))) return;
     await api.deleteProduct(id);
     await onChanged();
   };
@@ -93,12 +114,14 @@ export default function CatalogView({
     );
   };
 
+  const f = filter.trim().toLowerCase();
   const visible = list.filter(
     (p) =>
-      !filter ||
-      p.name.toLowerCase().includes(filter.toLowerCase()) ||
-      (p.category || '').toLowerCase().includes(filter.toLowerCase()) ||
-      String(p.id).includes(filter)
+      !f ||
+      p.name.toLowerCase().includes(f) ||
+      (p.category || '').toLowerCase().includes(f) ||
+      (p.barcode || '').includes(f) ||
+      String(p.id) === f
   );
 
   const allVisibleSelected =
@@ -115,7 +138,7 @@ export default function CatalogView({
 
   const bulkDelete = async () => {
     if (!selected.length) return;
-    if (!confirm(`Delete ${selected.length} selected product(s)?`)) return;
+    if (!confirm(t('cat.deleteMany', { n: selected.length }))) return;
     setBusy(true);
     setError(null);
     try {
@@ -123,7 +146,7 @@ export default function CatalogView({
       setSelected([]);
       await onChanged();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Bulk delete failed');
+      setError(err instanceof Error ? err.message : t('cat.bulkFailed'));
     } finally {
       setBusy(false);
     }
@@ -135,9 +158,15 @@ export default function CatalogView({
     try {
       const result = await api.seedDemo();
       await onChanged();
-      alert(result.message);
+      setNotice(
+        t('cat.seeded', {
+          p: result.productsAdded,
+          c: result.categoriesAdded,
+          u: result.customersAdded,
+        })
+      );
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Seed failed');
+      setError(err instanceof Error ? err.message : t('cat.seedFailed'));
     } finally {
       setBusy(false);
     }
@@ -156,21 +185,21 @@ export default function CatalogView({
   };
 
   const removeCategory = async (id: number) => {
-    if (!confirm('Delete this category?')) return;
+    if (!confirm(t('cat.deleteCategory'))) return;
     await api.deleteCategory(id);
     await onChanged();
   };
 
   return (
     <div>
-      <div className="chips" style={{ paddingLeft: 0, border: 0, marginBottom: '1rem' }}>
+      <div className="chips" style={{ paddingInlineStart: 0, border: 0, marginBottom: '1rem' }}>
         {canProducts && (
           <button
             type="button"
             className={`chip ${tab === 'products' ? 'active' : ''}`}
             onClick={() => setTab('products')}
           >
-            Products
+            {t('cat.products')}
           </button>
         )}
         {canCategories && (
@@ -179,13 +208,13 @@ export default function CatalogView({
             className={`chip ${tab === 'categories' ? 'active' : ''}`}
             onClick={() => setTab('categories')}
           >
-            Categories
+            {t('cat.categories')}
           </button>
         )}
         {canProducts && (
-          <div style={{ marginLeft: 'auto', display: 'flex', gap: '0.4rem' }}>
+          <div style={{ marginInlineStart: 'auto', display: 'flex', gap: '0.4rem' }}>
             <button type="button" className="btn" disabled={busy} onClick={seedDemo}>
-              Seed demo
+              {t('cat.seed')}
             </button>
             <button
               type="button"
@@ -193,42 +222,72 @@ export default function CatalogView({
               disabled={busy || !selected.length}
               onClick={bulkDelete}
             >
-              Delete selected ({selected.length})
+              {t('cat.deleteSelected', { n: selected.length })}
             </button>
           </div>
         )}
       </div>
 
       {error && <div className="error">{error}</div>}
+      {notice && (
+        <div className="notice">
+          {notice}{' '}
+          <button type="button" className="btn btn-ghost" onClick={() => setNotice(null)}>
+            {t('common.dismiss')}
+          </button>
+        </div>
+      )}
 
       {tab === 'products' && canProducts && (
         <div className="page-grid">
           <div className="panel" style={{ padding: '1rem' }}>
-            <h3 style={{ marginTop: 0 }}>{form.id ? 'Edit product' : 'New product'}</h3>
+            <h3 style={{ marginTop: 0 }}>{form.id ? t('cat.editProduct') : t('cat.newProduct')}</h3>
             <div className="field">
-              <label>Name</label>
+              <label>{t('cat.barcode')}</label>
               <input
+                ref={barcodeRef}
+                className="barcode"
+                value={form.barcode}
+                inputMode="numeric"
+                placeholder={t('cat.barcodePlaceholder')}
+                onChange={(e) => setForm({ ...form, barcode: e.target.value.replace(/\s/g, '') })}
+                onKeyDown={(e) => {
+                  // A scanner sends the digits then Enter — jump to the name field.
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    nameRef.current?.focus();
+                  }
+                }}
+                autoFocus
+              />
+            </div>
+            <div className="field">
+              <label>{t('common.name')}</label>
+              <input
+                ref={nameRef}
                 value={form.name}
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
               />
             </div>
             <div className="field">
-              <label>Price</label>
+              <label>{t('cat.price', { symbol })}</label>
               <input
-                type="number"
-                step="0.01"
-                min={0}
-                value={form.price}
-                onChange={(e) => setForm({ ...form, price: e.target.value })}
+                inputMode="numeric"
+                className="num-ltr"
+                value={form.price ? formatNumber(parseMoney(form.price)) : ''}
+                onChange={(e) => setForm({ ...form, price: String(parseMoney(e.target.value) || '') })}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') saveProduct();
+                }}
               />
             </div>
             <div className="field">
-              <label>Category</label>
+              <label>{t('cat.category')}</label>
               <select
                 value={form.category}
                 onChange={(e) => setForm({ ...form, category: e.target.value })}
               >
-                <option value="">None</option>
+                <option value="">{t('common.none')}</option>
                 {cats.map((c) => (
                   <option key={c.id} value={c.name}>
                     {c.name}
@@ -249,14 +308,15 @@ export default function CatalogView({
                 checked={form.trackStock}
                 onChange={(e) => setForm({ ...form, trackStock: e.target.checked })}
               />
-              Track inventory
+              {t('cat.trackStock')}
             </label>
             {form.trackStock && (
               <div className="field">
-                <label>Quantity on hand</label>
+                <label>{t('cat.qty')}</label>
                 <input
                   type="number"
                   min={0}
+                  className="num-ltr"
                   value={form.quantity}
                   onChange={(e) => setForm({ ...form, quantity: e.target.value })}
                 />
@@ -269,11 +329,11 @@ export default function CatalogView({
             />
             <div style={{ display: 'flex', gap: '0.5rem' }}>
               <button type="button" className="btn btn-primary" onClick={saveProduct}>
-                {form.id ? 'Update' : 'Add'} product
+                {form.id ? t('cat.updateProduct') : t('cat.addProduct')}
               </button>
               {form.id && (
                 <button type="button" className="btn" onClick={() => setForm(emptyProduct)}>
-                  Cancel
+                  {t('common.cancel')}
                 </button>
               )}
             </div>
@@ -281,11 +341,11 @@ export default function CatalogView({
 
           <div className="panel" style={{ padding: '1rem' }}>
             <div className="field">
-              <label>Search catalog</label>
+              <label>{t('cat.search')}</label>
               <input
                 value={filter}
                 onChange={(e) => setFilter(e.target.value)}
-                placeholder="Name, category, or ID"
+                placeholder={t('cat.searchPlaceholder')}
               />
             </div>
             <table className="table">
@@ -296,15 +356,15 @@ export default function CatalogView({
                       type="checkbox"
                       checked={allVisibleSelected}
                       onChange={toggleSelectAllVisible}
-                      title="Select all visible"
-                      aria-label="Select all visible"
+                      title={t('cat.selectAll')}
+                      aria-label={t('cat.selectAll')}
                     />
                   </th>
                   <th />
-                  <th>ID</th>
-                  <th>Name</th>
-                  <th>Price</th>
-                  <th>Stock</th>
+                  <th>{t('cat.colName')}</th>
+                  <th>{t('cat.colBarcode')}</th>
+                  <th>{t('cat.colPrice')}</th>
+                  <th>{t('cat.colStock')}</th>
                   <th />
                 </tr>
               </thead>
@@ -316,7 +376,7 @@ export default function CatalogView({
                         type="checkbox"
                         checked={selected.includes(p.id)}
                         onChange={() => toggleSelect(p.id)}
-                        aria-label={`Select ${p.name}`}
+                        aria-label={p.name}
                       />
                     </td>
                     <td>
@@ -336,35 +396,32 @@ export default function CatalogView({
                         <span className="muted">—</span>
                       )}
                     </td>
-                    <td>{p.id}</td>
                     <td>
                       <div>{p.name}</div>
                       <div className="muted" style={{ fontSize: '0.8rem', marginTop: '0.15rem' }}>
-                        {p.category || 'Uncategorized'}
+                        {p.category || t('cat.uncategorized')}
                       </div>
                     </td>
-                    <td>
-                      {symbol}
-                      {Number(p.price).toFixed(2)}
-                    </td>
-                    <td>{p.stock ? p.quantity : '—'}</td>
+                    <td className="barcode muted">{p.barcode || '—'}</td>
+                    <td className="money">{formatMoney(p.price, symbol)}</td>
+                    <td className="num-ltr">{p.stock ? p.quantity : '—'}</td>
                     <td>
                       <button type="button" className="btn" onClick={() => editProduct(p)}>
-                        Edit
+                        {t('common.edit')}
                       </button>{' '}
                       <button
                         type="button"
                         className="btn btn-danger"
                         onClick={() => removeProduct(p.id)}
                       >
-                        Del
+                        {t('common.delete')}
                       </button>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
-            {!visible.length && <div className="empty">No products yet</div>}
+            {!visible.length && <div className="empty">{t('cat.empty')}</div>}
           </div>
         </div>
       )}
@@ -372,20 +429,26 @@ export default function CatalogView({
       {tab === 'categories' && canCategories && (
         <div className="page-grid">
           <div className="panel" style={{ padding: '1rem' }}>
-            <h3 style={{ marginTop: 0 }}>{editCatId ? 'Edit category' : 'New category'}</h3>
+            <h3 style={{ marginTop: 0 }}>{editCatId ? t('cat.editCategory') : t('cat.newCategory')}</h3>
             <div className="field">
-              <label>Name</label>
-              <input value={catName} onChange={(e) => setCatName(e.target.value)} />
+              <label>{t('common.name')}</label>
+              <input
+                value={catName}
+                onChange={(e) => setCatName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') saveCategory();
+                }}
+              />
             </div>
             <button type="button" className="btn btn-primary" onClick={saveCategory}>
-              {editCatId ? 'Update' : 'Add'} category
+              {editCatId ? t('cat.updateCategory') : t('cat.addCategory')}
             </button>
           </div>
           <div className="panel" style={{ padding: '1rem' }}>
             <table className="table">
               <thead>
                 <tr>
-                  <th>Name</th>
+                  <th>{t('common.name')}</th>
                   <th />
                 </tr>
               </thead>
@@ -402,14 +465,14 @@ export default function CatalogView({
                           setCatName(c.name);
                         }}
                       >
-                        Edit
+                        {t('common.edit')}
                       </button>{' '}
                       <button
                         type="button"
                         className="btn btn-danger"
                         onClick={() => removeCategory(c.id)}
                       >
-                        Del
+                        {t('common.delete')}
                       </button>
                     </td>
                   </tr>
@@ -422,4 +485,3 @@ export default function CatalogView({
     </div>
   );
 }
-

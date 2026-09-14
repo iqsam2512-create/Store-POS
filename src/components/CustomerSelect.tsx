@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, Customer } from '../api/client';
+import { useT } from '../i18n';
 
 type Props = {
   customers: Customer[];
@@ -8,7 +9,6 @@ type Props = {
   onCustomersChanged?: () => Promise<void> | void;
 };
 
-const WALK_IN = { id: '0', name: 'Walk-in', phone: '', email: '', address: '' };
 
 export default function CustomerSelect({
   customers,
@@ -16,6 +16,8 @@ export default function CustomerSelect({
   onChange,
   onCustomersChanged,
 }: Props) {
+  const { t } = useT();
+  const WALK_IN = { id: '0', name: t('cust.walkIn'), phone: '', email: '', address: '' };
   const rootRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const [open, setOpen] = useState(false);
@@ -42,7 +44,7 @@ export default function CustomerSelect({
           address: found.address || '',
         }
       : WALK_IN;
-  }, [value, list]);
+  }, [value, list, WALK_IN.name]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -55,11 +57,11 @@ export default function CustomerSelect({
             (c.phone || '').toLowerCase().includes(q) ||
             (c.email || '').toLowerCase().includes(q)
         );
-    if (!q || 'walk-in'.includes(q) || 'walk in'.includes(q)) {
+    if (!q || walkIn.name.toLowerCase().includes(q) || 'walk-in'.includes(q)) {
       return [walkIn, ...matches];
     }
     return matches;
-  }, [list, query]);
+  }, [list, query, WALK_IN.name]);
 
   useEffect(() => {
     const onDoc = (e: MouseEvent) => {
@@ -83,7 +85,7 @@ export default function CustomerSelect({
 
   const quickAdd = async () => {
     if (!newName.trim()) {
-      setError('Name is required');
+      setError(t('cust.nameRequired'));
       return;
     }
     setBusy(true);
@@ -109,7 +111,7 @@ export default function CustomerSelect({
         setOpen(false);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not add customer');
+      setError(err instanceof Error ? err.message : t('cust.addFailed'));
     } finally {
       setBusy(false);
     }
@@ -128,7 +130,7 @@ export default function CustomerSelect({
         <span className="customer-avatar">{selected.name.slice(0, 1).toUpperCase()}</span>
         <span className="customer-meta">
           <strong>{selected.name}</strong>
-          <span>{selected.phone || (selected.id === '0' ? 'No account' : 'No phone')}</span>
+          <span className="num-ltr">{selected.phone || (selected.id === '0' ? t('cust.noAccount') : t('cust.noPhone'))}</span>
         </span>
         <span className="customer-caret">▾</span>
       </button>
@@ -140,7 +142,7 @@ export default function CustomerSelect({
               ref={inputRef}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search name or phone…"
+              placeholder={t('cust.searchPlaceholder')}
               onKeyDown={(e) => {
                 if (e.key === 'Escape') {
                   setOpen(false);
@@ -169,13 +171,13 @@ export default function CustomerSelect({
                 </span>
                 <span className="customer-meta">
                   <strong>{c.name}</strong>
-                  <span>{c.phone || (String(c.id) === '0' ? 'Default guest' : 'No phone')}</span>
+                  <span className="num-ltr">{c.phone || (String(c.id) === '0' ? t('cust.defaultGuest') : t('cust.noPhone'))}</span>
                 </span>
               </button>
             ))}
             {!filtered.length && (
               <div className="empty" style={{ padding: '0.85rem' }}>
-                No matches
+                {t('cust.noMatches')}
               </div>
             )}
           </div>
@@ -189,20 +191,22 @@ export default function CustomerSelect({
                 setNewName(query.trim());
               }}
             >
-              + New customer
+              {t('cust.quickAdd')}
             </button>
           ) : (
             <div className="customer-quick-add">
               <input
                 value={newName}
                 onChange={(e) => setNewName(e.target.value)}
-                placeholder="Customer name"
+                placeholder={t('cust.namePlaceholder')}
                 autoFocus
               />
               <input
                 value={newPhone}
                 onChange={(e) => setNewPhone(e.target.value)}
-                placeholder="Phone (optional)"
+                placeholder={t('cust.phonePlaceholder')}
+                dir="ltr"
+                inputMode="tel"
               />
               <div style={{ display: 'flex', gap: '0.4rem' }}>
                 <button
@@ -212,7 +216,7 @@ export default function CustomerSelect({
                   onClick={quickAdd}
                   style={{ flex: 1 }}
                 >
-                  {busy ? 'Saving…' : 'Add & select'}
+                  {busy ? t('common.saving') : t('cust.addSelect')}
                 </button>
                 <button
                   type="button"
@@ -222,7 +226,7 @@ export default function CustomerSelect({
                     setError(null);
                   }}
                 >
-                  Cancel
+                  {t('common.cancel')}
                 </button>
               </div>
             </div>

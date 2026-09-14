@@ -8,6 +8,8 @@ import {
   Transaction,
 } from '../api/client';
 import { useAuth } from '../context/AuthContext';
+import { Key, useT } from '../i18n';
+import { formatMoney } from '../money';
 import AppShell, { NavView } from '../layout/AppShell';
 import TillView from './TillView';
 import CatalogView from './CatalogView';
@@ -16,6 +18,7 @@ import TransactionsModal from '../components/TransactionsModal';
 
 export default function PosPage() {
   const { hasPerm } = useAuth();
+  const { t } = useT();
   const [view, setView] = useState<NavView>('till');
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -25,7 +28,7 @@ export default function PosPage() {
   const [holdCount, setHoldCount] = useState(0);
   const [todayTotal, setTodayTotal] = useState(0);
 
-  const symbol = settings?.symbol || '$';
+  const symbol = settings?.symbol || 'د.ع';
 
   const loadAll = async () => {
     const [p, c, cust, s] = await Promise.all([
@@ -69,7 +72,7 @@ export default function PosPage() {
   }, []);
 
   useEffect(() => {
-    if (!settings?.store && hasPerm('perm_settings')) {
+    if (settings && !settings.store && hasPerm('perm_settings')) {
       setView('settings');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -78,21 +81,21 @@ export default function PosPage() {
   const title = useMemo(() => {
     switch (view) {
       case 'till':
-        return settings?.store ? `${settings.store} · Till` : 'Till';
+        return t('title.till');
       case 'catalog':
-        return 'Catalog';
+        return t('nav.catalog');
       case 'sales':
-        return 'Sales history';
+        return t('title.sales');
       case 'customers':
-        return 'Customers';
+        return t('nav.customers');
       case 'team':
-        return 'Team';
+        return t('nav.team');
       case 'settings':
-        return 'Settings';
+        return t('nav.settings');
       default:
-        return 'Store POS';
+        return t('app.name');
     }
-  }, [view, settings]);
+  }, [view, settings, t]);
 
   return (
     <AppShell
@@ -100,14 +103,13 @@ export default function PosPage() {
       onNavigate={setView}
       title={title}
       logo={settings?.img || ''}
+      storeName={settings?.store}
       todaySales={
-        hasPerm('perm_transactions')
-          ? `${symbol}${todayTotal.toFixed(2)}`
-          : undefined
+        hasPerm('perm_transactions') ? formatMoney(todayTotal, symbol) : undefined
       }
       stats={
         view === 'till' && holdCount > 0 ? (
-          <span className="stat-pill">{holdCount} held</span>
+          <span className="stat-pill">{t('top.held', { n: holdCount })}</span>
         ) : null
       }
     >
@@ -115,7 +117,7 @@ export default function PosPage() {
         <div className="error">
           {error}{' '}
           <button type="button" className="btn btn-ghost" onClick={() => setError(null)}>
-            dismiss
+            {t('common.dismiss')}
           </button>
         </div>
       )}
@@ -153,28 +155,15 @@ export default function PosPage() {
       )}
 
       {view === 'customers' && (
-        <CustomersView customers={customers} onChanged={loadAll} />
+        <CustomersPanel customers={customers} onChanged={loadAll} />
       )}
 
-      {view === 'team' && <TeamView />}
+      {view === 'team' && <UsersPanel />}
 
       {view === 'settings' && (
         <SettingsView settings={settings} onSaved={loadAll} />
       )}
     </AppShell>
-  );
-}
-
-function CustomersView({
-  customers,
-  onChanged,
-}: {
-  customers: Customer[];
-  onChanged: () => Promise<void>;
-}) {
-  // Reuse modal body as always-open panel by rendering CustomersModal embedded-style
-  return (
-    <CustomersPanel customers={customers} onChanged={onChanged} />
   );
 }
 
@@ -185,6 +174,7 @@ function CustomersPanel({
   customers: Customer[];
   onChanged: () => Promise<void>;
 }) {
+  const { t } = useT();
   const [list, setList] = useState(customers);
   const [form, setForm] = useState({
     id: '',
@@ -220,7 +210,7 @@ function CustomersPanel({
   };
 
   const remove = async (id: number) => {
-    if (!confirm('Delete customer?')) return;
+    if (!confirm(t('cust.delete'))) return;
     await api.deleteCustomer(id);
     await onChanged();
   };
@@ -228,30 +218,33 @@ function CustomersPanel({
   return (
     <div className="page-grid">
       <div className="panel" style={{ padding: '1rem' }}>
-        <h3 style={{ marginTop: 0 }}>{form.id ? 'Edit customer' : 'New customer'}</h3>
+        <h3 style={{ marginTop: 0 }}>{form.id ? t('cust.edit') : t('cust.new')}</h3>
         <div className="field">
-          <label>Name</label>
+          <label>{t('common.name')}</label>
           <input
             value={form.name}
             onChange={(e) => setForm({ ...form, name: e.target.value })}
           />
         </div>
         <div className="field">
-          <label>Phone</label>
+          <label>{t('common.phone')}</label>
           <input
             value={form.phone}
             onChange={(e) => setForm({ ...form, phone: e.target.value })}
+            dir="ltr"
+            inputMode="tel"
           />
         </div>
         <div className="field">
-          <label>Email</label>
+          <label>{t('common.email')}</label>
           <input
             value={form.email}
             onChange={(e) => setForm({ ...form, email: e.target.value })}
+            dir="ltr"
           />
         </div>
         <div className="field">
-          <label>Address</label>
+          <label>{t('common.address')}</label>
           <textarea
             rows={3}
             value={form.address}
@@ -259,45 +252,47 @@ function CustomersPanel({
           />
         </div>
         <button type="button" className="btn btn-primary" onClick={save}>
-          {form.id ? 'Update' : 'Add'} customer
+          {form.id ? t('cust.update') : t('cust.add')}
         </button>
       </div>
       <div className="panel" style={{ padding: '1rem' }}>
         <table className="table">
           <thead>
             <tr>
-              <th>Name</th>
-              <th>Phone</th>
+              <th>{t('common.name')}</th>
+              <th>{t('common.phone')}</th>
               <th />
             </tr>
           </thead>
           <tbody>
-            {list.map((c) => (
-              <tr key={c.id}>
-                <td>{c.name}</td>
-                <td>{c.phone}</td>
-                <td>
-                  <button
-                    type="button"
-                    className="btn"
-                    onClick={() =>
-                      setForm({
-                        id: String(c.id),
-                        name: c.name,
-                        phone: c.phone,
-                        email: c.email,
-                        address: c.address,
-                      })
-                    }
-                  >
-                    Edit
-                  </button>{' '}
-                  <button type="button" className="btn btn-danger" onClick={() => remove(c.id)}>
-                    Del
-                  </button>
-                </td>
-              </tr>
-            ))}
+            {list
+              .filter((c) => c.name !== 'Walk-in Customer')
+              .map((c) => (
+                <tr key={c.id}>
+                  <td>{c.name}</td>
+                  <td className="num-ltr">{c.phone}</td>
+                  <td>
+                    <button
+                      type="button"
+                      className="btn"
+                      onClick={() =>
+                        setForm({
+                          id: String(c.id),
+                          name: c.name,
+                          phone: c.phone,
+                          email: c.email,
+                          address: c.address,
+                        })
+                      }
+                    >
+                      {t('common.edit')}
+                    </button>{' '}
+                    <button type="button" className="btn btn-danger" onClick={() => remove(c.id)}>
+                      {t('common.delete')}
+                    </button>
+                  </td>
+                </tr>
+              ))}
           </tbody>
         </table>
       </div>
@@ -305,13 +300,10 @@ function CustomersPanel({
   );
 }
 
-function TeamView() {
-  return <UsersPanel />;
-}
-
 function UsersPanel() {
+  const { t } = useT();
   const [list, setList] = useState<Awaited<ReturnType<typeof api.getUsers>>>([]);
-  const [form, setForm] = useState({
+  const emptyForm = {
     id: '',
     username: '',
     password: '',
@@ -321,7 +313,8 @@ function UsersPanel() {
     perm_transactions: true,
     perm_users: false,
     perm_settings: false,
-  });
+  };
+  const [form, setForm] = useState(emptyForm);
   const [error, setError] = useState<string | null>(null);
 
   const load = async () => setList(await api.getUsers());
@@ -333,68 +326,62 @@ function UsersPanel() {
   const save = async () => {
     setError(null);
     if (!form.username.trim() || !form.fullname.trim()) {
-      setError('Username and full name are required');
+      setError(t('team.required'));
       return;
     }
     if (!form.id && !form.password) {
-      setError('Password is required for new users');
+      setError(t('team.pwRequired'));
       return;
     }
     try {
       await api.saveUser({ ...form });
       await load();
-      setForm({
-        id: '',
-        username: '',
-        password: '',
-        fullname: '',
-        perm_products: true,
-        perm_categories: true,
-        perm_transactions: true,
-        perm_users: false,
-        perm_settings: false,
-      });
+      setForm(emptyForm);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Save failed');
+      setError(err instanceof Error ? err.message : t('team.saveFailed'));
     }
   };
+
+  const perms = [
+    'perm_products',
+    'perm_categories',
+    'perm_transactions',
+    'perm_users',
+    'perm_settings',
+  ] as const;
 
   return (
     <div className="page-grid">
       <div className="panel" style={{ padding: '1rem' }}>
-        <h3 style={{ marginTop: 0 }}>{form.id ? 'Edit user' : 'New user'}</h3>
+        <h3 style={{ marginTop: 0 }}>{form.id ? t('team.edit') : t('team.new')}</h3>
         {error && <div className="error">{error}</div>}
         <div className="field">
-          <label>Username</label>
+          <label>{t('team.username')}</label>
           <input
             value={form.username}
             onChange={(e) => setForm({ ...form, username: e.target.value })}
+            dir="ltr"
           />
         </div>
         <div className="field">
-          <label>Full name</label>
+          <label>{t('team.fullname')}</label>
           <input
             value={form.fullname}
             onChange={(e) => setForm({ ...form, fullname: e.target.value })}
           />
         </div>
         <div className="field">
-          <label>Password {form.id ? '(blank = keep)' : ''}</label>
+          <label>
+            {t('team.password')} {form.id ? t('team.keep') : ''}
+          </label>
           <input
             type="password"
             value={form.password}
             onChange={(e) => setForm({ ...form, password: e.target.value })}
+            dir="ltr"
           />
         </div>
-        {(
-          [
-            ['perm_products', 'Catalog products'],
-            ['perm_categories', 'Categories'],
-            ['perm_transactions', 'Sales history'],
-            ['perm_users', 'Team'],
-            ['perm_settings', 'Settings'],
-          ] as const
-        ).map(([key, label]) => (
+        {perms.map((key) => (
           <label
             key={key}
             style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.4rem', alignItems: 'center' }}
@@ -404,26 +391,26 @@ function UsersPanel() {
               checked={form[key]}
               onChange={(e) => setForm({ ...form, [key]: e.target.checked })}
             />
-            {label}
+            {t(`perm.${key}` as Key)}
           </label>
         ))}
         <button type="button" className="btn btn-primary" onClick={save} style={{ marginTop: '0.75rem' }}>
-          {form.id ? 'Update' : 'Add'} user
+          {form.id ? t('team.update') : t('team.add')}
         </button>
       </div>
       <div className="panel" style={{ padding: '1rem' }}>
         <table className="table">
           <thead>
             <tr>
-              <th>User</th>
-              <th>Name</th>
+              <th>{t('team.colUser')}</th>
+              <th>{t('team.colName')}</th>
               <th />
             </tr>
           </thead>
           <tbody>
             {list.map((u) => (
               <tr key={u.id}>
-                <td>{u.username}</td>
+                <td className="num-ltr">{u.username}</td>
                 <td>{u.fullname}</td>
                 <td>
                   <button
@@ -443,7 +430,7 @@ function UsersPanel() {
                       })
                     }
                   >
-                    Edit
+                    {t('common.edit')}
                   </button>
                 </td>
               </tr>

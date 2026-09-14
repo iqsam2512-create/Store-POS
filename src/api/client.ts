@@ -23,6 +23,7 @@ export type Product = {
   quantity: number;
   stock: number;
   img: string;
+  barcode: string;
 };
 
 export type Category = {
